@@ -1,0 +1,12 @@
+{"cmd":"hello","id":"hello"}
+{"cmd":"select_presets","vendor":"PrusaResearch","printer":"Original Prusa MK4S 0.4 nozzle","id":"select"}
+{"cmd":"add_shape","shape":"cube","size":30,"id":"cube"}
+{"cmd":"slice","id":"plain"}
+{"cmd":"set","preset":"print","config":{"fill_pattern":"flowsnake","fill_density":"20%"},"id":"flowsnake infill"}
+{"cmd":"slice","id":"slice flowsnake"}
+{"cmd":"set","preset":"print","config":{"fill_pattern":"crosshatch"},"id":"crosshatch infill"}
+{"cmd":"set","preset":"print","config":{"seam_type":"niptuck","seam_position":"aligned_rear"},"id":"nip/tuck seams, aligned rear"}
+{"cmd":"set","preset":"print","config":{"small_area_infill_flow_compensation":"1","bridge_density":"80%"},"id":"small-area flow, bridge density"}
+{"cmd":"slice","id":"slice crosshatch + niptuck"}
+{"cmd":"set","preset":"print","config":{"seam_type":"sideways"},"id":"bad seam type"}
+{"cmd":"quit"}

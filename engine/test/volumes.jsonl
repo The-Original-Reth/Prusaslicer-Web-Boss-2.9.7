@@ -1,0 +1,16 @@
+{"cmd":"select_presets","vendor":"PrusaResearch","printer":"Original Prusa MK4S 0.4 nozzle","id":"select"}
+{"cmd":"add_shape","shape":"cube","size":30,"id":"cube"}
+{"cmd":"slice","id":"slice plain cube"}
+{"cmd":"add_volume","object":14,"type":"modifier","shape":"box","id":"add modifier"}
+{"cmd":"volume_transform","object":14,"volume":26,"matrix":[1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1],"id":"move modifier to the middle"}
+{"cmd":"volume_config","object":14,"volume":26,"set":{"fill_density":"100%"},"id":"modifier 100% infill"}
+{"cmd":"slice","id":"slice with modifier"}
+{"cmd":"volume_config","object":14,"volume":26,"set":{"support_material":"1"},"id":"object-only setting on a modifier"}
+{"cmd":"add_volume","object":14,"type":"negative","shape":"cylinder","id":"add negative cylinder"}
+{"cmd":"volume_transform","object":14,"volume":33,"matrix":[1,0,0,0, 0,1,0,0, 0,0,2,0, 0,0,0,1],"id":"cylinder through the middle"}
+{"cmd":"slice","id":"slice with hole"}
+{"cmd":"add_volume","object":14,"type":"support_enforcer","shape":"slab","id":"add enforcer slab"}
+{"cmd":"add_volume","object":14,"type":"modifier","shape":"pyramid","id":"unknown shape"}
+{"cmd":"delete_volume","object":14,"volume":17,"id":"delete the only part"}
+{"cmd":"delete_volume","object":14,"volume":33,"id":"delete the hole"}
+{"cmd":"quit"}

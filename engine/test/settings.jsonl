@@ -1,0 +1,14 @@
+{"cmd":"schema","id":"schema"}
+{"cmd":"select_presets","vendor":"PrusaResearch","printer":"Original Prusa MK4S 0.4 nozzle","id":"select"}
+{"cmd":"set","preset":"print","config":{"fill_density":"40%","perimeters":"0"},"id":"set-print"}
+{"cmd":"set","config":{"temperature":{"index":0,"value":"230"}},"id":"set-filament"}
+{"cmd":"set","preset":"printer","config":{"extruders_count":2},"id":"two-extruders"}
+{"cmd":"set","preset":"printer","config":{"retract_length":{"index":1,"value":"1.5"}},"id":"set-extruder-2"}
+{"cmd":"set","preset":"print","config":{"fill_density":"lots"},"id":"bad-value"}
+{"cmd":"reset","preset":"printer","keys":["retract_length#1"],"id":"reset-one"}
+{"cmd":"reset","preset":"printer","id":"reset-printer"}
+{"cmd":"select_presets","vendor":"PrusaResearch","printer":"Original Prusa MK4S 0.4 nozzle","print":"0.15mm SPEED @MK4S 0.4","transfer":true,"id":"transfer"}
+{"cmd":"select_presets","vendor":"PrusaResearch","printer":"Original Prusa MK4S 0.4 nozzle","print":"0.20mm SPEED @MK4S 0.4","id":"discard"}
+{"cmd":"add_shape","shape":"cube","size":20,"id":"cube"}
+{"cmd":"slice","id":"slice"}
+{"cmd":"quit"}
