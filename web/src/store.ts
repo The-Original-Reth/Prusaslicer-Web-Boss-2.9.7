@@ -39,6 +39,12 @@ interface State {
   mode: Mode;
   // A preset switch waiting for "transfer or discard the changes?"
   pendingSwitch: { presets: PresetChoice; types: PresetType[] } | null;
+  // The top bar's search, which searches the settings tabs (as BOSS's search does)
+  search: string;
+  // The plater's sidebar folded away (BOSS's collapse button, Shift+Tab)
+  sidebarCollapsed: boolean;
+  // The settings tab the top bar's "Settings" button opens
+  lastSettings: PresetType;
 }
 
 const MODE_KEY = "psw-mode";
@@ -61,6 +67,9 @@ export const useStore = create<State>(() => ({
   settings: null,
   mode: savedMode(),
   pendingSwitch: null,
+  search: "",
+  sidebarCollapsed: false,
+  lastSettings: "print",
   plate: null,
   choices: { prints: [], filaments: [], user: [] },
   userPrinters: [],
@@ -171,7 +180,9 @@ function applyPlate(plate: Plate, changed: boolean) {
     if (changed) next.stale = true;
     return next;
   });
-  if (plate.presets) localStorage.setItem(PRESETS_KEY, JSON.stringify(plate.presets));
+  // Remembered for new projects, unless they came with a 3MF (a new project won't have them)
+  const p = plate.presets;
+  if (p && !Object.values(p.project ?? {}).some(Boolean)) localStorage.setItem(PRESETS_KEY, JSON.stringify(p));
 }
 
 // A new (or reloaded) tab: fetch the plate, and give a new project presets
@@ -311,6 +322,9 @@ export async function uploadModels(files: FileList | File[]) {
       const reply = await res.json();
       if (!res.ok) throw new Error(reply.detail ?? res.statusText);
       if (reply.state) applyPlate(reply.state, true);
+      // A 3MF project brings its printer, print and filament settings
+      if (reply.settings) set({ settings: reply.settings });
+      if (reply.loaded_settings) notify(`Printer, print and filament settings loaded from ${reply.loaded_settings}`);
     } catch (e) {
       notify((e as Error).message);
     } finally {

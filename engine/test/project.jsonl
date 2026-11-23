@@ -1,0 +1,6 @@
+{"cmd":"select_presets","vendor":"PrusaResearch","printer":"Original Prusa MK4S 0.4 nozzle","id":"start on an MK4S"}
+{"cmd":"load","path":"/cmp/hammer.3mf","id":"load a 3MF project with its own printer"}
+{"cmd":"slice","id":"slice with the project's settings"}
+{"cmd":"select_presets","vendor":"PrusaResearch","printer":"hammer.3mf (Trident_Purple_Rapido_0.5_WC)","print":"hammer.3mf (VT796-AWD-Purple_Rapido_0.2_Layer_0.5_WC)","filament":"hammer.3mf (Inland_PLA)","id":"select the project presets again by name"}
+{"cmd":"delete_preset","preset":"printer","id":"a project preset is not yours to delete"}
+{"cmd":"quit"}

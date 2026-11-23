@@ -25,14 +25,14 @@ export function Scene() {
   return (
     <Canvas
       camera={{ fov: 35, near: 1, far: 10000, position: [125, -260, 260] }}
-      gl={{ antialias: true }}
+      // Transparent: the stage behind draws the gray gradient BOSS has
+      gl={{ antialias: true, alpha: true }}
       onPointerDown={(e) => (down.current = { x: e.clientX, y: e.clientY })}
       onPointerMissed={(e) => {
         const moved = Math.hypot(e.clientX - down.current.x, e.clientY - down.current.y);
         if (e.button === 0 && moved < 4) select(null);
       }}
     >
-      <color attach="background" args={["#2d3036"]} />
       <hemisphereLight args={["#ffffff", "#3a3d44", 1.4]} />
       <directionalLight position={[-200, -300, 500]} intensity={1.6} />
       <directionalLight position={[300, 200, 200]} intensity={0.5} />
@@ -71,12 +71,49 @@ function CameraFit() {
   return null;
 }
 
+// The bed's texture (a vendor's SVG or PNG from BOSS's resources), drawn into a canvas big
+// enough to stay sharp, as BOSS renders its SVG bed textures
+function useBedTexture(path: string | undefined) {
+  const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  useEffect(() => {
+    setTexture(null);
+    if (!path) return;
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      const ratio = img.naturalHeight / Math.max(1, img.naturalWidth) || 1;
+      const canvas = document.createElement("canvas");
+      canvas.width = 2048;
+      canvas.height = Math.round(2048 * ratio);
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const t = new THREE.CanvasTexture(canvas);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 8;
+      setTexture(t);
+    };
+    img.src = `/api/resources/${path}`;
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+  return texture;
+}
+
 function Bed() {
   const shape = useStore((s) => s.plate?.bed.shape);
+  const texturePath = useStore((s) => s.plate?.bed.texture);
+  const texture = useBedTexture(texturePath);
   const bed = useBedBox();
   const { surface, outline, grid } = useMemo(() => {
     const pts = (shape ?? [[0, 0], [250, 0], [250, 210], [0, 210]]).map(([x, y]) => new THREE.Vector2(x, y));
     const surface = new THREE.ShapeGeometry(new THREE.Shape(pts));
+    // The texture spans the bed's bounding box, as in BOSS
+    const pos = surface.getAttribute("position");
+    const w = bed.max.x - bed.min.x || 1, h = bed.max.y - bed.min.y || 1;
+    const uv: number[] = [];
+    for (let i = 0; i < pos.count; ++i) uv.push((pos.getX(i) - bed.min.x) / w, (pos.getY(i) - bed.min.y) / h);
+    surface.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
     const outline = new THREE.BufferGeometry().setFromPoints([...pts, pts[0]].map((p) => new THREE.Vector3(p.x, p.y, 0.02)));
     const lines: number[] = [];
     for (let x = Math.ceil(bed.min.x / 10) * 10; x <= bed.max.x; x += 10) lines.push(x, bed.min.y, 0.01, x, bed.max.y, 0.01);
@@ -87,16 +124,32 @@ function Bed() {
   }, [shape, bed]);
   return (
     <group>
-      <mesh geometry={surface} receiveShadow>
-        <meshStandardMaterial color="#45484f" roughness={0.9} transparent opacity={0.92} side={THREE.DoubleSide} />
-      </mesh>
-      <lineSegments geometry={grid}>
-        <lineBasicMaterial color="#5d616a" />
-      </lineSegments>
-      <line>
-        <primitive object={outline} attach="geometry" />
-        <lineBasicMaterial color="#9aa0aa" />
-      </line>
+      {texture ? (
+        <>
+          {/* The plate under the texture (BOSS draws the printer's bed model there); the
+              texture's own transparent parts show it */}
+          <mesh geometry={surface}>
+            <meshBasicMaterial color="#383838" side={THREE.DoubleSide} />
+          </mesh>
+          <mesh geometry={surface} position={[0, 0, 0.01]}>
+            <meshBasicMaterial map={texture} transparent side={THREE.DoubleSide} toneMapped={false} depthWrite={false} />
+          </mesh>
+        </>
+      ) : (
+        <>
+          {/* BOSS's plain bed: gray, with a 10 mm grid */}
+          <mesh geometry={surface}>
+            <meshBasicMaterial color="#5c5c5c" transparent opacity={0.85} side={THREE.DoubleSide} />
+          </mesh>
+          <lineSegments geometry={grid}>
+            <lineBasicMaterial color="#7d7d7d" />
+          </lineSegments>
+          <line>
+            <primitive object={outline} attach="geometry" />
+            <lineBasicMaterial color="#9a9a9a" />
+          </line>
+        </>
+      )}
       <axesHelper args={[20]} position={[bed.min.x, bed.min.y, 0.03]} />
     </group>
   );

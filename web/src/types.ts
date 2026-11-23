@@ -23,6 +23,8 @@ export interface Presets {
   filament: string;
   // Which of these are the user's own saved presets
   user?: Record<"print" | "filament" | "printer", boolean>;
+  // Which came with a project file (3MF) and exist only in this project
+  project?: Record<"print" | "filament" | "printer", boolean>;
 }
 
 export interface UserPrinter {
@@ -55,7 +57,8 @@ export interface PlateObject {
 
 export interface Plate {
   presets: Presets | null;
-  bed: { shape: [number, number][]; max_height: number };
+  // texture: the printer's bed picture under BOSS's resources ("" when it has none)
+  bed: { shape: [number, number][]; max_height: number; texture?: string };
   settings: Record<string, string>;
   objects: PlateObject[];
   choices?: Choices;

@@ -270,9 +270,10 @@ public:
             throw std::runtime_error("unknown printer: " + printer_name);
         const PresetWithVendorProfile printer_v = b.printers.get_preset_with_vendor_profile(*printer);
 
+        // A project's own presets (loaded from a 3MF) are always offered, as BOSS does
         m_print_choices.clear();
         for (const Preset& p : b.prints)
-            if (!p.is_default && is_compatible_with_printer(b.prints.get_preset_with_vendor_profile(p), printer_v))
+            if (!p.is_default && (p.is_external || is_compatible_with_printer(b.prints.get_preset_with_vendor_profile(p), printer_v)))
                 m_print_choices.push_back(p.name);
         if (m_print_choices.empty())
             throw std::runtime_error("no print profile fits " + printer_name);
@@ -285,7 +286,7 @@ public:
             if (f.is_default || !f.is_visible || (f.vendor && f.vendor->templates_profile))
                 continue;
             const PresetWithVendorProfile f_v = b.filaments.get_preset_with_vendor_profile(f);
-            if (is_compatible_with_printer(f_v, printer_v) && is_compatible_with_print(f_v, print_v, printer_v))
+            if (f.is_external || (is_compatible_with_printer(f_v, printer_v) && is_compatible_with_print(f_v, print_v, printer_v)))
                 m_filament_choices.push_back(f.name);
         }
         if (m_filament_choices.empty())
@@ -398,7 +399,7 @@ public:
     {
         PresetCollection* c = collection(type);
         const Preset& selected = c->get_selected_preset();
-        if (!selected.is_user())
+        if (!selected.is_user() || selected.is_external)
             throw std::runtime_error("only presets you saved can be deleted");
         const Preset* parent = c->get_selected_preset_parent();
         std::string next = parent && parent != &selected && !parent->is_default ? parent->name : "";
@@ -464,19 +465,63 @@ public:
         return { { "values", values }, { "modified", modified }, { "disabled", web::disabled_options(b) } };
     }
 
+    // Adds the objects in a model file. A project file (3MF) saved by PrusaSlicer also brings
+    // its printer, print and filament settings, which are selected as BOSS's plater does it
+    // (PresetBundle::load_config_model): a preset of the same name with the same values is
+    // selected as it is, one with other values is selected with those values as unsaved
+    // changes, and one this server doesn't have becomes a project preset named as in the
+    // file, which can be saved as a preset of your own.
     json load(const std::string& path)
     {
-        Model loaded = FileReader::load_model(path);
+        const std::string file_name = boost::filesystem::path(path).filename().string();
+        const bool project_file = FileReader::is_project_file(path);
+        DynamicPrintConfig config;
+        Model loaded;
+        if (project_file) {
+            ConfigSubstitutionContext substitutions(ForwardCompatibilitySubstitutionRule::EnableSilent);
+            boost::optional<Semver> generator;
+            loaded = FileReader::load_model_with_config(path, &config, &substitutions, generator,
+                                                        FileReader::LoadAttribute::AddDefaultInstances);
+        } else
+            loaded = FileReader::load_model(path);
         if (loaded.objects.empty())
-            throw std::runtime_error("no objects in " + boost::filesystem::path(path).filename().string());
+            throw std::runtime_error("no objects in " + file_name);
+
+        json out;
+        const bool with_settings = !config.empty() && config.has("printer_settings_id") &&
+                                   Preset::printer_technology(config) == ptFFF;
+        if (with_settings) {
+            Preset::normalize(config);
+            if (!m_bundle) {
+                m_bundle = std::make_unique<PresetBundle>();
+                m_vendor.clear();
+            }
+            m_bundle->load_config_model(path, std::move(config));
+            // The project's presets are now the selected ones; selecting them by name keeps
+            // their values (and unsaved changes), and refreshes the offered presets and the
+            // config. Done before the objects are added, so a new bed doesn't move them.
+            m_printer_name  = m_bundle->printers.get_selected_preset_name();
+            m_print_name    = m_bundle->prints.get_selected_preset_name();
+            m_filament_name = m_bundle->filaments.get_selected_preset_name();
+            select_presets(m_vendor, m_printer_name, m_print_name, m_filament_name, false);
+            // Color changes and pauses at heights, and the wipe tower's place, as saved
+            m_model.get_custom_gcode_per_print_z_vector() = loaded.get_custom_gcode_per_print_z_vector();
+            m_model.get_wipe_tower_vector()               = loaded.get_wipe_tower_vector();
+        }
+
         // Project files (3MF) keep their own placement, like BOSS's CLI does
-        const bool keep_placement = FileReader::is_project_file(path);
+        const bool keep_placement = project_file;
         const bool plate_was_empty = m_model.objects.empty();
         for (ModelObject* o : loaded.objects)
             add_object(*o, !keep_placement || o->instances.empty());
         if (!keep_placement && !(plate_was_empty && loaded.objects.size() == 1))
             arrange_plate();
-        return state(false);
+        if (!with_settings)
+            return state(false);
+        out = state(true);
+        out["settings"] = settings();
+        out["loaded_settings"] = file_name;
+        return out;
     }
 
     json add_shape(const std::string& shape, double size)
@@ -734,19 +779,33 @@ public:
         json bed = json::array();
         for (const Vec2d& p : m_config.option<ConfigOptionPoints>("bed_shape")->values)
             bed.push_back({ p.x(), p.y() });
+        // The bed's picture, as BOSS draws it: the texture of the printer model in its
+        // vendor's profile (for a printer of your own, of the system printer it's based
+        // on), as a path under BOSS's resources, which the gateway serves
+        std::string texture;
+        if (m_bundle)
+            if (const Preset* system = m_bundle->printers.get_selected_preset_parent(); system && system->vendor) {
+                const std::string full = PresetUtils::system_printer_bed_texture(*system);
+                const std::string prefix = resources_dir() + "/";
+                if (boost::algorithm::starts_with(full, prefix) && boost::filesystem::exists(full))
+                    texture = full.substr(prefix.size());
+            }
 
         json presets = nullptr;
         if (m_bundle) {
             // Which of the selected presets are the user's own (they can be deleted)
-            json user = json::object();
-            for (const PresetCollection* c : collections())
-                user[type_name(c->type())] = c->get_selected_preset().is_user();
+            // ...and which came with a project file (3MF): they last as long as this project
+            json user = json::object(), project = json::object();
+            for (const PresetCollection* c : collections()) {
+                user[type_name(c->type())]    = c->get_selected_preset().is_user() && !c->get_selected_preset().is_external;
+                project[type_name(c->type())] = c->get_selected_preset().is_external;
+            }
             presets = { { "vendor", m_vendor }, { "printer", m_printer_name }, { "print", m_print_name },
-                        { "filament", m_filament_name }, { "user", user } };
+                        { "filament", m_filament_name }, { "user", user }, { "project", project } };
         }
         json out = {
             { "presets", presets },
-            { "bed", { { "shape", bed }, { "max_height", m_config.opt_float("max_print_height") } } },
+            { "bed", { { "shape", bed }, { "max_height", m_config.opt_float("max_print_height") }, { "texture", texture } } },
             { "settings", settings },
             { "objects", objects },
         };
@@ -756,7 +815,7 @@ public:
             for (const auto& [c, names] : { std::pair{ &m_bundle->prints, &m_print_choices },
                                             std::pair{ &m_bundle->filaments, &m_filament_choices } })
                 for (const std::string& name : *names)
-                    if (const Preset* p = c->find_preset(name, false, false); p && p->is_user())
+                    if (const Preset* p = c->find_preset(name, false, false); p && p->is_user() && !p->is_external)
                         user.push_back(name);
             out["choices"] = { { "prints", m_print_choices }, { "filaments", m_filament_choices }, { "user", user } };
         }

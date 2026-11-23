@@ -363,5 +363,21 @@ async def session_file(sid: str, name: str, download: str | None = None):
                         media_type="text/plain" if name.endswith(".gcode") else "application/octet-stream")
 
 
+# BOSS's own pictures, so the page looks like BOSS: its icons (resources/icons) and the
+# vendors' bed textures (resources/profiles/<vendor>/). Read-only, pictures only.
+RESOURCES_DIR = Path(os.environ.get("ENGINE_RESOURCES", "/opt/engine/resources")).resolve()
+RESOURCE_FILE = re.compile(r"^(icons/[\w.\-]+\.(svg|png)|profiles/[\w.\-]+/[\w.\- ]+\.(svg|png))$")
+
+
+@app.get("/api/resources/{path:path}")
+async def resource_file(path: str):
+    if not RESOURCE_FILE.match(path):
+        raise HTTPException(404)
+    file = (RESOURCES_DIR / path).resolve()
+    if RESOURCES_DIR not in file.parents or not file.is_file():
+        raise HTTPException(404)
+    return FileResponse(file, headers={"Cache-Control": "public, max-age=86400"})
+
+
 if WEB_DIR:
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

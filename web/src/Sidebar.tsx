@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { PrinterPicker } from "./PrinterPicker";
 import { ObjectSettings, VOLUME_KINDS } from "./ObjectSettings";
 import { PresetOptions } from "./Settings";
+import { Icon, showView } from "./App";
 import { fileUrl, requestPresets, run, select, slice, useStore } from "./store";
 import type { PlateObject } from "./types";
 
@@ -44,12 +45,37 @@ function supportsIndex(s: Record<string, string>) {
   return s.support_material_buildplate_only === "1" ? 1 : 3;
 }
 
+// BOSS's preset combo: an icon, the preset, and a button that opens its settings tab
+function PresetCombo({ label, icon, type, children }: {
+  label: string;
+  icon: React.ReactNode;
+  type: "print" | "filament" | "printer";
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="preset-row">
+      <span className="preset-row-label">{label}:</span>
+      <div className="preset-combo">
+        <span className="combo-icon">{icon}</span>
+        {children}
+        <button className="combo-edit" title="Click to edit preset" onClick={() => showView(type)}>
+          <Icon name="cog" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Presets() {
   const presets = useStore((s) => s.plate?.presets);
   const settings = useStore((s) => s.plate?.settings ?? {});
   const choices = useStore((s) => s.choices);
   const busy = useStore((s) => s.busy);
   const modified = useStore((s) => s.settings?.modified);
+  const colour = useStore((s) => {
+    const c = s.settings?.values.filament.filament_colour;
+    return (Array.isArray(c) ? c[0] : c) as string | undefined;
+  });
   const [picking, setPicking] = useState(false);
 
   const change = (field: "print" | "filament", value: string) => {
@@ -62,28 +88,25 @@ function Presets() {
     preset && modified?.[type].length ? `${preset} (modified)` : preset;
 
   return (
-    <Section title="Presets">
-      <label className="field">
-        <span>Print settings</span>
+    <section className="presets">
+      <PresetCombo label="Print settings" type="print" icon={<Icon name="cog" />}>
         <select value={presets?.print ?? ""} disabled={!presets || !!busy} onChange={(e) => change("print", e.target.value)}>
           <PresetOptions names={choices.prints} user={choices.user} label={(p) => (p === presets?.print ? name(p, "print")! : p)} />
         </select>
-      </label>
-      <label className="field">
-        <span>Filament</span>
+      </PresetCombo>
+      <PresetCombo label="Filament" type="filament" icon={<span className="filament-swatch" style={{ background: colour || "#808080" }} />}>
         <select value={presets?.filament ?? ""} disabled={!presets || !!busy} onChange={(e) => change("filament", e.target.value)}>
           <PresetOptions names={choices.filaments} user={choices.user} label={(f) => (f === presets?.filament ? name(f, "filament")! : f)} />
         </select>
-      </label>
-      <div className="field">
-        <span>Printer</span>
+      </PresetCombo>
+      <PresetCombo label="Printer" type="printer" icon={<Icon name="printer" />}>
         <button className="picker-button" disabled={!!busy} onClick={() => setPicking(true)} title={presets?.printer}>
           {name(presets?.printer, "printer") ?? "Choose a printer…"}
         </button>
-      </div>
-      <div className="field-grid">
-        <label className="field">
-          <span>Supports</span>
+      </PresetCombo>
+      <div className="quick-settings">
+        <label>
+          <span>Supports:</span>
           <select
             value={supportsIndex(settings)}
             disabled={!presets}
@@ -92,85 +115,128 @@ function Presets() {
             {SUPPORTS.map((s, i) => <option key={s.label} value={i}>{s.label}</option>)}
           </select>
         </label>
-        <label className="field">
-          <span>Infill</span>
-          <select value={infill} disabled={!presets} onChange={(e) => void run("set", { preset: "print", config: { fill_density: e.target.value } })}>
-            {infills.map((v) => <option key={v}>{v}</option>)}
-          </select>
-        </label>
-        <label className="field check">
-          <input
-            type="checkbox"
-            disabled={!presets}
-            checked={parseFloat(settings.brim_width ?? "0") > 0}
-            onChange={(e) => void run("set", { preset: "print", config: { brim_width: e.target.checked ? "5" : "0" } })}
-          />
-          <span>Brim</span>
-        </label>
+        <div className="quick-row">
+          <label>
+            <span>Infill:</span>
+            <select value={infill} disabled={!presets} onChange={(e) => void run("set", { preset: "print", config: { fill_density: e.target.value } })}>
+              {infills.map((v) => <option key={v}>{v}</option>)}
+            </select>
+          </label>
+          <label className="brim">
+            <span>Brim:</span>
+            <input
+              type="checkbox"
+              disabled={!presets}
+              checked={parseFloat(settings.brim_width ?? "0") > 0}
+              onChange={(e) => void run("set", { preset: "print", config: { brim_width: e.target.checked ? "5" : "0" } })}
+            />
+          </label>
+        </div>
       </div>
       {picking && <PrinterPicker onClose={() => setPicking(false)} />}
-    </Section>
+    </section>
   );
 }
 
+// BOSS's object list: a tree of objects and their parts, with Name and Editing columns.
+// Right-click (or the × in the Editing column) deletes.
 function ObjectList() {
   const objects = useStore((s) => s.plate?.objects ?? []);
   const selected = useStore((s) => s.selected);
   const selectedVolume = useStore((s) => s.selectedVolume);
+  const [menu, setMenu] = useState<{ x: number; y: number; object: number; volume?: number } | null>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [menu]);
+  const openMenu = (e: React.MouseEvent, object: number, volume?: number) => {
+    e.preventDefault();
+    select(object, volume);
+    setMenu({ x: e.clientX, y: e.clientY, object, volume });
+  };
   return (
-    <Section title={`Objects (${objects.length})`}>
-      {objects.length === 0 ? (
-        <p className="hint">Add a model with the + button, or drop STL, 3MF, OBJ or AMF files on the bed.</p>
-      ) : (
-        <ul className="object-list">
-          {objects.map((o) => (
-            <Fragment key={o.id}>
-              <li className={o.id === selected && selectedVolume === null ? "selected" : ""} onClick={() => select(o.id)}>
-                <span className="name" title={o.name}>{o.name || "Object"}</span>
-                {o.instances.length > 1 && <span className="count">×{o.instances.length}</span>}
+    <div className="object-list">
+      <div className="object-list-head">
+        <span>Name</span>
+        <span />
+        <span>Editing</span>
+      </div>
+      <ul>
+        {objects.map((o) => (
+          <Fragment key={o.id}>
+            <li
+              className={o.id === selected && selectedVolume === null ? "selected" : ""}
+              onClick={() => select(o.id)}
+              onContextMenu={(e) => openMenu(e, o.id)}
+              title={`${o.name} — ${o.size.map((v) => v.toFixed(2)).join(" × ")} mm`}
+            >
+              <span className="name">
+                {o.volumes.length > 1 && <span className="twisty">▾</span>}
+                {o.name || "Object"}
+                {o.instances.length > 1 && <span className="count"> ({o.instances.length})</span>}
+              </span>
+              <span className="extruder" />
+              <span className="editing">
                 {Object.keys(o.settings ?? {}).length > 0 && (
-                  <span className="has-settings" title={`Own settings: ${Object.keys(o.settings).length}`}>⚙</span>
+                  <span title={`Own settings: ${Object.keys(o.settings).join(", ")}`}><Icon name="cog" /></span>
                 )}
-                <span className="dims">{o.size.map((v) => v.toFixed(1)).join(" × ")}</span>
-                <button
-                  className="icon"
-                  title="Delete"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void run("delete", { object: o.id });
-                  }}
-                >
-                  ×
+                <button className="row-action" title="Edit (right-click for more)" onClick={(e) => openMenu(e, o.id)}>
+                  <Icon name="edit_uni" />
                 </button>
-              </li>
-              {/* Like BOSS, an object's volumes are listed once it has more than one */}
-              {o.volumes.length > 1 &&
-                o.volumes.map((v) => (
-                  <li
-                    key={v.id}
-                    className={`volume ${v.type}${v.id === selectedVolume ? " selected" : ""}`}
-                    onClick={() => select(o.id, v.id)}
-                  >
+              </span>
+            </li>
+            {/* Like BOSS, an object's volumes are listed once it has more than one */}
+            {o.volumes.length > 1 &&
+              o.volumes.map((v) => (
+                <li
+                  key={v.id}
+                  className={`volume ${v.type}${v.id === selectedVolume ? " selected" : ""}`}
+                  onClick={() => select(o.id, v.id)}
+                  onContextMenu={(e) => openMenu(e, o.id, v.id)}
+                >
+                  <span className="name" title={`${VOLUME_KINDS[v.type].label}: ${v.name}`}>
                     <span className="volume-icon" title={VOLUME_KINDS[v.type].label}>{VOLUME_KINDS[v.type].icon}</span>
-                    <span className="name" title={`${VOLUME_KINDS[v.type].label}: ${v.name}`}>{v.name || VOLUME_KINDS[v.type].label}</span>
-                    {Object.keys(v.settings).length > 0 && <span className="has-settings">⚙</span>}
-                    <button
-                      className="icon"
-                      title="Delete"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void run("delete_volume", { object: o.id, volume: v.id });
-                      }}
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))}
-            </Fragment>
-          ))}
+                    {v.name || VOLUME_KINDS[v.type].label}
+                  </span>
+                  <span className="extruder" />
+                  <span className="editing">
+                    {Object.keys(v.settings).length > 0 && <span title="Own settings"><Icon name="cog" /></span>}
+                  </span>
+                </li>
+              ))}
+          </Fragment>
+        ))}
+      </ul>
+      {objects.length === 0 && <p className="hint">Add a model with the + button, or drop STL, 3MF, OBJ or AMF files on the bed.</p>}
+      {menu && (
+        <ul className="menu-items context" style={{ left: menu.x, top: menu.y }}>
+          <li>
+            <button
+              onClick={() =>
+                void (menu.volume !== undefined
+                  ? run("delete_volume", { object: menu.object, volume: menu.volume })
+                  : run("delete", { object: menu.object }))
+              }
+            >
+              <span className="check"><Icon name="delete" /></span>
+              <span className="label">Delete</span>
+              <span className="shortcut">Del</span>
+            </button>
+          </li>
+          {menu.volume === undefined && (
+            <li>
+              <button onClick={() => void run("arrange")}>
+                <span className="check"><Icon name="arrange" /></span>
+                <span className="label">Arrange</span>
+                <span className="shortcut">A</span>
+              </button>
+            </li>
+          )}
         </ul>
       )}
-    </Section>
+    </div>
   );
 }
 

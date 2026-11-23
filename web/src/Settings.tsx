@@ -6,11 +6,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { PrinterPicker } from "./PrinterPicker";
-import { answerPendingSwitch, deletePreset, editSetting, notify, requestPresets, resetSettings, savePreset, setMode, useStore } from "./store";
+import { answerPendingSwitch, deletePreset, editSetting, notify, requestPresets, resetSettings, savePreset, useStore } from "./store";
 import type { LayoutGroup, LayoutLine, LayoutOption, LayoutPage, Mode, OptionDef, PresetType, Schema, Settings, Value } from "./types";
 
 const TITLES: Record<PresetType, string> = { print: "Print settings", filament: "Filament", printer: "Printer" };
-const MODES: { mode: Mode; label: string }[] = [
+export const MODES: { mode: Mode; label: string }[] = [
   { mode: "simple", label: "Simple" },
   { mode: "advanced", label: "Advanced" },
   { mode: "expert", label: "Expert" },
@@ -104,7 +104,8 @@ export function SettingsView({ type }: { type: PresetType }) {
   const settings = useStore((s) => s.settings);
   const mode = useStore((s) => s.mode);
   const [pageTitle, setPageTitle] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  const query = useStore((s) => s.search);
+  const setQuery = (q: string) => useStore.setState({ search: q });
 
   if (!schema || !settings) return <div className="settings"><p className="hint pad">Loading settings…</p></div>;
   const values = settings.values[type];
@@ -115,7 +116,7 @@ export function SettingsView({ type }: { type: PresetType }) {
 
   return (
     <div className="settings">
-      <SettingsHeader type={type} query={query} setQuery={setQuery} />
+      <SettingsHeader type={type} />
       <div className="settings-body">
         <nav className="settings-pages">
           {pages.map((p) => (
@@ -161,11 +162,10 @@ function SearchResults({ pages, ctx, query }: { pages: Page[]; ctx: Context; que
   );
 }
 
-function SettingsHeader({ type, query, setQuery }: { type: PresetType; query: string; setQuery: (q: string) => void }) {
+function SettingsHeader({ type }: { type: PresetType }) {
   const presets = useStore((s) => s.plate?.presets);
   const choices = useStore((s) => s.choices);
   const busy = useStore((s) => s.busy);
-  const mode = useStore((s) => s.mode);
   const modified = useStore((s) => s.settings?.modified[type].length ?? 0);
   const [picking, setPicking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -193,6 +193,11 @@ function SettingsHeader({ type, query, setQuery }: { type: PresetType; query: st
             <PresetOptions names={list} user={choices.user} />
           </select>
         )}
+        {presets.project?.[type] && (
+          <span className="modified-tag" title="Loaded from the project file; save it to keep it for other projects">
+            (from project)
+          </span>
+        )}
         {modified > 0 && <span className="modified-tag">(modified)</span>}
         <button className="text-button" disabled={!!busy} title="Save these settings as a preset of your own" onClick={() => setSaving(true)}>
           <SaveIcon /> Save…
@@ -208,29 +213,6 @@ function SettingsHeader({ type, query, setQuery }: { type: PresetType; query: st
         >
           <UndoIcon /> Reset all
         </button>
-      </div>
-      <div className="settings-tools">
-        <input
-          className="search"
-          placeholder="Search settings…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-        />
-        <div className="modes" role="radiogroup" aria-label="Mode">
-          {MODES.map((m) => (
-            <button
-              key={m.mode}
-              role="radio"
-              aria-checked={mode === m.mode}
-              className={`mode-${m.mode}${mode === m.mode ? " active" : ""}`}
-              onClick={() => setMode(m.mode)}
-            >
-              <span className="mode-dot" />
-              {m.label}
-            </button>
-          ))}
-        </div>
       </div>
       {picking && <PrinterPicker onClose={() => setPicking(false)} />}
       {saving && <SavePresetDialog type={type} current={presets[type]} isUser={isUser} onClose={() => setSaving(false)} />}
