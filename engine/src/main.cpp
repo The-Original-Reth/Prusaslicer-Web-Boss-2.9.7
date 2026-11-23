@@ -496,6 +496,16 @@ public:
                 m_bundle = std::make_unique<PresetBundle>();
                 m_vendor.clear();
             }
+            // The preset names the project was saved with, as its G-code would name them
+            auto text = [&config](const char* key) {
+                const auto* o = config.option<ConfigOptionString>(key);
+                return o ? o->value : std::string();
+            };
+            const std::string saved_print    = text("print_settings_id");
+            const std::string saved_printer  = text("printer_settings_id");
+            const std::string saved_physical = text("physical_printer_settings_id");
+            const auto* filaments_saved      = config.option<ConfigOptionStrings>("filament_settings_id");
+            const std::string saved_filament = filaments_saved && !filaments_saved->values.empty() ? filaments_saved->values.front() : "";
             m_bundle->load_config_model(path, std::move(config));
             // The project's presets are now the selected ones; selecting them by name keeps
             // their values (and unsaved changes), and refreshes the offered presets and the
@@ -503,6 +513,19 @@ public:
             m_printer_name  = m_bundle->printers.get_selected_preset_name();
             m_print_name    = m_bundle->prints.get_selected_preset_name();
             m_filament_name = m_bundle->filaments.get_selected_preset_name();
+            // Presets this server doesn't have are named after the file here ("x.3mf (name)").
+            // On the computer that saved the project they have their own names, and that's
+            // what desktop BOSS writes into the G-code ([filament_settings_id] etc. in custom
+            // G-code, e.g. a PRINT_START macro), so the G-code gets those names
+            if (m_bundle->prints.get_selected_preset().is_external && !saved_print.empty())
+                m_project_names[m_print_name] = saved_print;
+            if (m_bundle->filaments.get_selected_preset().is_external && !saved_filament.empty())
+                m_project_names[m_filament_name] = saved_filament;
+            if (m_bundle->printers.get_selected_preset().is_external && !saved_printer.empty()) {
+                m_project_names[m_printer_name] = saved_printer;
+                // The physical printer it was sliced for (BOSS has none here)
+                m_project_physical[m_printer_name] = saved_physical;
+            }
             select_presets(m_vendor, m_printer_name, m_print_name, m_filament_name, false);
             // Color changes and pauses at heights, and the wipe tower's place, as saved
             m_model.get_custom_gcode_per_print_z_vector() = loaded.get_custom_gcode_per_print_z_vector();
@@ -883,6 +906,18 @@ private:
             b.extruders_filaments.emplace_back(ExtruderFilaments(&b.filaments, i, m_filament_name));
         m_config = b.full_config();
         m_config.normalize_fdm();
+        // A project's own presets go into the G-code under the names the project saved
+        // (see load)
+        auto saved = [this](const std::string& name) {
+            const auto it = m_project_names.find(name);
+            return it == m_project_names.end() ? name : it->second;
+        };
+        m_config.opt_string("print_settings_id", true)   = saved(m_print_name);
+        m_config.opt_string("printer_settings_id", true) = saved(m_printer_name);
+        for (std::string& f : m_config.option<ConfigOptionStrings>("filament_settings_id", true)->values)
+            f = saved(f);
+        if (const auto it = m_project_physical.find(m_printer_name); it != m_project_physical.end())
+            m_config.opt_string("physical_printer_settings_id", true) = it->second;
     }
 
     static std::string pick(const std::vector<std::string>& choices, std::initializer_list<std::string> wanted)
@@ -1119,6 +1154,9 @@ private:
     std::string                   m_vendor;
     std::unique_ptr<PresetBundle> m_bundle;
     std::string                   m_printer_name, m_print_name, m_filament_name;
+    // A project's own presets (from a 3MF): their names here > the names the project saved,
+    // and the physical printer it was saved with, by printer preset
+    std::map<std::string, std::string> m_project_names, m_project_physical;
     std::vector<std::string>      m_print_choices, m_filament_choices;
 
     std::string m_gcode_file, m_output_name;
